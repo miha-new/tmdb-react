@@ -1,43 +1,64 @@
+console.log('ENV:', {
+  API_ACCESS_TOKEN: process.env.API_ACCESS_TOKEN ? '***' : 'MISSING',
+  API_URL: process.env.API_URL || 'using default'
+});
+
 export const runtime = 'edge';
 
 export async function GET(request) {
-  console.log('API_URL:', process.env.API_URL);
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      }
+    });
+  }
+
   const { searchParams } = new URL(request.url);
   const path = searchParams.get('path');
   
   if (!path) {
-    return Response.json({ error: 'Missing path parameter' }, { status: 400 });
+    return new Response(JSON.stringify({ error: 'Missing path' }), {
+      status: 400,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*' 
+      }
+    });
   }
 
-  const url = new URL(`${process.env.API_URL}${path}`);
-  
-  searchParams.forEach((value, key) => {
-    if (key !== 'path') url.searchParams.append(key, value);
-  });
+  const apiUrl = 'https://api.themoviedb.org/3';
+  const url = new URL(path.startsWith('/') ? `${apiUrl}${path}` : `${apiUrl}/${path}`);
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${process.env.API_ACCESS_TOKEN}`,
         'Accept': 'application/json'
       }
     });
-    
-    if (!response.ok) throw new Error(`Error: ${response.status}`);
-    
-    const headers = new Headers(response.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
-    headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers
+    const data = await response.json();
+    
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch' },
-      { status: 500 }
-    );
+    return new Response(JSON.stringify({ 
+      error: error.message || 'API request failed' 
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   }
 }
