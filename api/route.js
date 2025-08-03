@@ -1,6 +1,7 @@
 export const runtime = 'edge';
 
 export async function GET(request) {
+  console.log('API_URL:', process.env.API_URL);
   const { searchParams } = new URL(request.url);
   const path = searchParams.get('path');
   
@@ -15,13 +16,16 @@ export async function GET(request) {
   });
 
   try {
-    const response = await fetch(url.toString());
+    const response = await fetch(url.toString(), {
+      headers: {
+        'Authorization': `Bearer ${process.env.API_ACCESS_TOKEN}`,
+        'Accept': 'application/json'
+      }
+    });
     
     if (!response.ok) throw new Error(`Error: ${response.status}`);
     
     const headers = new Headers(response.headers);
-    headers.set('Authorization', `Bearer ${process.env.API_ACCESS_TOKEN}`);
-    headers.set('Accept', 'application/json');
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
 

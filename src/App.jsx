@@ -10,7 +10,7 @@ function App() {
     try {
       const response = await axios.get('/api', {
         params: {
-          path: '/movie/popular',
+          path: 'movie/popular',
         },
       });
       console.log(response);
