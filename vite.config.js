@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
-          target: 'https://api.themoviedb.org/3/',
+          target: process.env.API_URL,
           changeOrigin: true,
           rewrite: (path) => {
             const url = new URL(path, 'http://localhost')
