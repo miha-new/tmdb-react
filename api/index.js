@@ -25,8 +25,7 @@ export async function GET(request) {
     });
   }
 
-  const apiUrl = process.env.API_URL;
-  const url = new URL(`${apiUrl}${path}`);
+  const url = new URL('https://api.themoviedb.org/3/');
 
   try {
     const response = await fetch(url, {
