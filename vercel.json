@@ -2,14 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "route.js",
+      "src": "vite.config.js",
+      "use": "@vercel/vite"
+    },
+    {
+      "src": "api/route.js",
       "use": "@vercel/edge"
     }
   ],
   "routes": [
     {
-      "src": "/api",
-      "dest": "route.js"
+      "src": "/api/.*",
+      "dest": "api/route.js"
+    },
+    {
+      "src": "/.*",
+      "dest": "index.html"
     }
   ]
 }
