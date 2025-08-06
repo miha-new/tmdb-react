@@ -58,7 +58,8 @@ export async function GET(request) {
   }
 
   const url = new URL(path, API_URL);
-
+  console.log('Final URL:', url.toString());
+  
   try {
     console.log('Fetching URL:', url.toString());
     const response = await fetch(url, {
