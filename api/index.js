@@ -2,109 +2,112 @@ export const runtime = 'edge';
 
 const ALLOWED_METHODS = ['GET', 'OPTIONS'];
 const ALLOWED_PATHS = ['movie/', 'tv/'];
+const DEFAULT_CACHE_MAX_AGE = 3600; // 1 час
+
+// 1. Универсальный конструктор заголовков
+const buildHeaders = (options = {}) => {
+  const {
+    originAllowed = false,
+    requestOrigin = null,
+    contentType = 'application/json',
+    cacheControl = `public, max-age=${DEFAULT_CACHE_MAX_AGE}`
+  } = options;
+
+  const headers = new Headers();
+
+  headers.set('Content-Type', contentType);
+  if (cacheControl) headers.set('Cache-Control', cacheControl);
+  if (originAllowed && requestOrigin) {
+    headers.set('Access-Control-Allow-Origin', requestOrigin);
+  }
+
+  return headers;
+};
+
+// 2. Обработчик ошибок
+const errorResponse = (message, status, options = {}) => {
+  const headers = buildHeaders(options);
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers
+  });
+};
 
 export async function GET(request) {
-  // 1. Получаем переменные окружения
+  // Конфигурация
   const API_URL = process.env.API_URL?.endsWith('/') 
     ? process.env.API_URL 
     : process.env.API_URL + '/';
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
-  console.log('[DEBUG] API_URL:', API_URL); // Логируем для проверки
-
-  // 2. Проверяем CORS
+  // CORS проверка
   const requestOrigin = request.headers.get('Origin');
   const isOriginAllowed = !requestOrigin || ALLOWED_ORIGINS.includes(requestOrigin);
+  const commonHeadersOptions = {
+    originAllowed: isOriginAllowed,
+    requestOrigin
+  };
 
-  // 3. Обрабатываем OPTIONS (для CORS)
+  // OPTIONS запрос
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        ...(isOriginAllowed && { 'Access-Control-Allow-Origin': requestOrigin }),
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      }
+    const headers = buildHeaders({
+      ...commonHeadersOptions,
+      cacheControl: 'public, max-age=86400'
     });
+    headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    return new Response(null, { headers });
   }
 
-  // 4. Проверяем метод
+  // Проверка метода
   if (!ALLOWED_METHODS.includes(request.method)) {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 
-        'Content-Type': 'application/json',
-        ...(isOriginAllowed && { 'Access-Control-Allow-Origin': requestOrigin }),
-      }
-    });
+    return errorResponse('Method not allowed', 405, commonHeadersOptions);
   }
 
-  // 5. Получаем path из URL
+  // Валидация path
   const { searchParams } = new URL(request.url);
   const path = searchParams.get('path');
 
   if (!path) {
-    return new Response(JSON.stringify({ error: 'Missing "path" parameter' }), {
-      status: 400,
-      headers: { 
-        'Content-Type': 'application/json',
-        ...(isOriginAllowed && { 'Access-Control-Allow-Origin': requestOrigin }),
-      }
-    });
+    return errorResponse('Missing "path" parameter', 400, commonHeadersOptions);
   }
 
-  // 6. Проверяем, что path разрешён
   if (!ALLOWED_PATHS.some(allowedPath => path.startsWith(allowedPath))) {
-    return new Response(JSON.stringify({ error: 'Invalid path' }), {
-      status: 400,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': ALLOWED_ORIGINS[0] || '*',
-      }
+    return errorResponse('Invalid path', 400, {
+      ...commonHeadersOptions,
+      requestOrigin: ALLOWED_ORIGINS[0] || '*'
     });
   }
 
-  // 7. Формируем итоговый URL
-  const fullUrl = new URL(path, API_URL);
-  console.log('[DEBUG] Final request URL:', fullUrl.toString()); // Логируем URL
-
+  // Основной запрос
   try {
-    // 8. Отправляем запрос к API
+    const fullUrl = new URL(path, API_URL);
+    console.log('Request to:', fullUrl.toString());
+
     const apiResponse = await fetch(fullUrl, {
       headers: {
         'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
-        'Accept': 'application/json',
-      },
+        'Accept': 'application/json'
+      }
     });
 
-    // 9. Проверяем статус ответа
     if (!apiResponse.ok) {
-      const errorText = await apiResponse.text();
-      console.error('[ERROR] API response:', errorText);
-      throw new Error(`API returned ${apiResponse.status}: ${apiResponse.statusText}`);
+      const errorData = await apiResponse.text();
+      throw new Error(`API error: ${apiResponse.status} - ${errorData}`);
     }
 
-    // 10. Возвращаем данные
     const data = await apiResponse.json();
-    return new Response(JSON.stringify(data), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(isOriginAllowed && { 'Access-Control-Allow-Origin': requestOrigin }),
-      },
-    });
+    const headers = buildHeaders(commonHeadersOptions);
+    
+    return new Response(JSON.stringify(data), { headers });
 
   } catch (error) {
-    // 11. Обрабатываем ошибки
-    console.error('[ERROR] Full error:', error);
-    return new Response(JSON.stringify({ 
-      error: error.message || 'Internal server error' 
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': ALLOWED_ORIGINS[0] || '*',
-      },
+    console.error('API failure:', error);
+    return errorResponse(error.message, 500, {
+      ...commonHeadersOptions,
+      requestOrigin: ALLOWED_ORIGINS[0] || '*'
     });
   }
 }
