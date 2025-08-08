@@ -1,51 +1,68 @@
+import ApiRequestBuilder from './ApiRequestBuilder'
+import MiddlewareChain from './MiddlewareChain'
+import RequestStrategy from './RequestStrategy'
+
 export const runtime = 'edge';
 
 const ALLOWED_METHODS = ['GET', 'OPTIONS'];
+
+// Decorator для динамического расширения методов
+function withLogging(propertyKey, descriptor) {
+  const originalMethod = descriptor.value;
+  descriptor.value = async function (...args) {
+    console.log(`Calling ${propertyKey} with args:`, args);
+    try {
+      const result = await originalMethod.apply(this, args);
+      console.log(`Method ${propertyKey} succeeded`);
+      return result;
+    } catch (error) {
+      console.error(`Method ${propertyKey} failed:`, error);
+      throw error;
+    }
+  };
+  return descriptor;
+}
 
 class ApiProxy {
   constructor() {
     this.API_URL = process.env.API_URL;
     this.API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
+    this.requestStrategy = new RequestStrategy();
+    this.middlewareChain = new MiddlewareChain();
+
+    // Настройка стратегий
+    this.requestStrategy
+      .setStrategy('GET', (path) => this.forwardRequest(path))
+      .setStrategy('OPTIONS', () => this.handleOptionsRequest());
   }
 
   // Основной метод для обработки запроса
   async handleRequest(request) {
-    if (request.method === 'OPTIONS') {
-      return this.handleOptionsRequest();
-    }
-
-    if (!ALLOWED_METHODS.includes(request.method)) {
-      return this.errorResponse('Method not allowed', 405);
-    }
-
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-
-    if (!path) {
-      return this.errorResponse('Missing "path" parameter', 400);
+    // Применяем цепочку middleware
+    const middlewareResult = await this.middlewareChain.execute(request);
+    if (middlewareResult instanceof Response) {
+      return middlewareResult;
     }
 
     try {
-      const apiResponse = await this.forwardRequest(path);
-      const data = await apiResponse.json();
-      return new Response(JSON.stringify(data));
+      return await this.requestStrategy.execute(request.method, request);
     } catch (error) {
-      console.error('API failure:', error);
-      return this.errorResponse(error.message, 500);
+      console.error('Request handling failed:', error);
+      return this.errorResponse(error.message, error.status || 500);
     }
   }
 
   // Перенаправляет запрос к целевому API
+  @withLogging
   async forwardRequest(path) {
-    const fullUrl = new URL(path, this.API_URL);
-    console.log('Request to:', fullUrl.toString());
+    const builder = new ApiRequestBuilder(this.API_URL)
+      .setHeader('Authorization', `Bearer ${this.API_ACCESS_TOKEN}`)
+      .setHeader('Accept', 'application/json');
 
-    const apiResponse = await fetch(fullUrl, {
-      headers: {
-        'Authorization': `Bearer ${this.API_ACCESS_TOKEN}`,
-        'Accept': 'application/json'
-      }
-    });
+    const { url, headers } = builder.build(path);
+    console.log('Request to:', url);
+
+    const apiResponse = await fetch(url, { headers });
 
     if (!apiResponse.ok) {
       const errorData = await apiResponse.text();
@@ -69,7 +86,26 @@ class ApiProxy {
   }
 }
 
-// Создаем прокси, чтобы перехватывать вызовы (дополнительный уровень контроля)
+// Middleware примеры
+function validateRequest(request) {
+  if (!ALLOWED_METHODS.includes(request.method)) {
+    return new Response(null, { status: 405 });
+  }
+  return request;
+}
+
+function logRequest(request) {
+  console.log(`Incoming request: ${request.method} ${request.url}`);
+  return request;
+}
+
+// Создаем прокси
+const apiProxyInstance = new ApiProxy();
+// Добавляем middleware
+apiProxyInstance.middlewareChain
+  .use(logRequest)
+  .use(validateRequest);
+
 const apiProxyHandler = {
   get(target, prop) {
     if (prop === 'handleRequest') {
@@ -82,10 +118,13 @@ const apiProxyHandler = {
   }
 };
 
-const apiProxyInstance = new ApiProxy();
 const proxiedApi = new Proxy(apiProxyInstance, apiProxyHandler);
 
 // Экспортируем обработчик
 export async function GET(request) {
+  return proxiedApi.handleRequest(request);
+}
+
+export async function OPTIONS(request) {
   return proxiedApi.handleRequest(request);
 }
