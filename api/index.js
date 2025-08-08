@@ -1,56 +1,47 @@
 export const runtime = 'edge';
 
 const ALLOWED_METHODS = ['GET', 'OPTIONS'];
-const DEFAULT_CACHE_MAX_AGE = 3600;
 
 class ApiProxy {
   constructor() {
     this.API_URL = process.env.API_URL;
     this.API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
-    this.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || [];
   }
 
   // Основной метод для обработки запроса
   async handleRequest(request) {
-    const requestOrigin = request.headers.get('Origin');
-    const commonHeaders = this.getCommonHeaders(requestOrigin);
-
     if (request.method === 'OPTIONS') {
-      return this.handleOptionsRequest(commonHeaders);
+      return this.handleOptionsRequest();
     }
 
     if (!ALLOWED_METHODS.includes(request.method)) {
-      return this.errorResponse('Method not allowed', 405, commonHeaders);
+      return this.errorResponse('Method not allowed', 405);
     }
 
     const { searchParams } = new URL(request.url);
     const path = searchParams.get('path');
 
     if (!path) {
-      return this.errorResponse('Missing "path" parameter', 400, commonHeaders);
+      return this.errorResponse('Missing "path" parameter', 400);
     }
 
     try {
-      const apiResponse = await this.forwardRequest(path, commonHeaders);
+      const apiResponse = await this.forwardRequest(path);
       const data = await apiResponse.json();
-      return new Response(JSON.stringify(data), { headers: commonHeaders });
+      return new Response(JSON.stringify(data));
     } catch (error) {
       console.error('API failure:', error);
-      return this.errorResponse(error.message, 500, {
-        ...commonHeaders,
-        'Request-Origin': this.ALLOWED_ORIGINS[0] || '*'
-      });
+      return this.errorResponse(error.message, 500);
     }
   }
 
   // Перенаправляет запрос к целевому API
-  async forwardRequest(path, headers) {
+  async forwardRequest(path) {
     const fullUrl = new URL(path, this.API_URL);
     console.log('Request to:', fullUrl.toString());
 
     const apiResponse = await fetch(fullUrl, {
       headers: {
-        ...headers,
         'Authorization': `Bearer ${this.API_ACCESS_TOKEN}`,
         'Accept': 'application/json'
       }
@@ -65,31 +56,16 @@ class ApiProxy {
   }
 
   // Обрабатывает CORS preflight (OPTIONS)
-  handleOptionsRequest(headers) {
-    const corsHeaders = new Headers(headers);
-    corsHeaders.set('Cache-Control', 'public, max-age=86400');
+  handleOptionsRequest() {
+    const corsHeaders = new Headers();
     corsHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
     corsHeaders.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Формирует общие заголовки
-  getCommonHeaders(requestOrigin) {
-    const headers = new Headers({
-      'Content-Type': 'application/json',
-      'Cache-Control': `public, max-age=${DEFAULT_CACHE_MAX_AGE}`,
-      'Origin-Allowed': !requestOrigin || this.ALLOWED_ORIGINS.includes(requestOrigin),
-      'Request-Origin': requestOrigin,
-    });
-    return headers;
-  }
-
   // Универсальный метод для ошибок
-  errorResponse(message, status, headers) {
-    return new Response(JSON.stringify({ error: message }), {
-      status,
-      headers
-    });
+  errorResponse(message, status) {
+    return new Response(JSON.stringify({ error: message }), { status });
   }
 }
 
