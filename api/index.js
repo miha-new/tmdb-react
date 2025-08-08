@@ -1,30 +1,33 @@
 export const runtime = 'edge';
 
 const ALLOWED_METHODS = ['GET', 'OPTIONS'];
-const ALLOWED_PATHS = ['movie/', 'tv/'];
-const DEFAULT_CACHE_MAX_AGE = 3600; // 1 час
+const DEFAULT_CACHE_MAX_AGE = 3600;
 
-// 1. Универсальный конструктор заголовков
 const buildHeaders = (options = {}) => {
   const {
     originAllowed = false,
     requestOrigin = null,
     contentType = 'application/json',
-    cacheControl = `public, max-age=${DEFAULT_CACHE_MAX_AGE}`
+    cacheControl = `public, max-age=${DEFAULT_CACHE_MAX_AGE}`,
+    customHeaders = {}
   } = options;
 
   const headers = new Headers();
 
-  headers.set('Content-Type', contentType);
+  if (contentType) headers.set('Content-Type', contentType);
   if (cacheControl) headers.set('Cache-Control', cacheControl);
+  
   if (originAllowed && requestOrigin) {
     headers.set('Access-Control-Allow-Origin', requestOrigin);
   }
 
+  Object.entries(customHeaders).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
+
   return headers;
 };
 
-// 2. Обработчик ошибок
 const errorResponse = (message, status, options = {}) => {
   const headers = buildHeaders(options);
   return new Response(JSON.stringify({ error: message }), {
@@ -34,14 +37,12 @@ const errorResponse = (message, status, options = {}) => {
 };
 
 export async function GET(request) {
-  // Конфигурация
   const API_URL = process.env.API_URL?.endsWith('/') 
     ? process.env.API_URL 
     : process.env.API_URL + '/';
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
-  // CORS проверка
   const requestOrigin = request.headers.get('Origin');
   const isOriginAllowed = !requestOrigin || ALLOWED_ORIGINS.includes(requestOrigin);
   const commonHeadersOptions = {
@@ -49,7 +50,6 @@ export async function GET(request) {
     requestOrigin
   };
 
-  // OPTIONS запрос
   if (request.method === 'OPTIONS') {
     const headers = buildHeaders({
       ...commonHeadersOptions,
@@ -61,12 +61,10 @@ export async function GET(request) {
     return new Response(null, { headers });
   }
 
-  // Проверка метода
   if (!ALLOWED_METHODS.includes(request.method)) {
     return errorResponse('Method not allowed', 405, commonHeadersOptions);
   }
 
-  // Валидация path
   const { searchParams } = new URL(request.url);
   const path = searchParams.get('path');
 
@@ -74,23 +72,17 @@ export async function GET(request) {
     return errorResponse('Missing "path" parameter', 400, commonHeadersOptions);
   }
 
-  if (!ALLOWED_PATHS.some(allowedPath => path.startsWith(allowedPath))) {
-    return errorResponse('Invalid path', 400, {
-      ...commonHeadersOptions,
-      requestOrigin: ALLOWED_ORIGINS[0] || '*'
-    });
-  }
-
-  // Основной запрос
   try {
     const fullUrl = new URL(path, API_URL);
     console.log('Request to:', fullUrl.toString());
 
     const apiResponse = await fetch(fullUrl, {
-      headers: {
-        'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
-        'Accept': 'application/json'
-      }
+      headers: buildHeaders({
+        customHeaders: {
+          'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
+          'Accept': 'application/json'
+        }
+      })
     });
 
     if (!apiResponse.ok) {
