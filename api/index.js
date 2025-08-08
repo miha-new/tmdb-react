@@ -3,33 +3,8 @@ export const runtime = 'edge';
 const ALLOWED_METHODS = ['GET', 'OPTIONS'];
 const DEFAULT_CACHE_MAX_AGE = 3600;
 
-const buildHeaders = (options = {}) => {
-  const {
-    originAllowed = false,
-    requestOrigin = null,
-    contentType = 'application/json',
-    cacheControl = `public, max-age=${DEFAULT_CACHE_MAX_AGE}`,
-    customHeaders = {}
-  } = options;
-
-  const headers = new Headers();
-
-  if (contentType) headers.set('Content-Type', contentType);
-  if (cacheControl) headers.set('Cache-Control', cacheControl);
-  
-  if (originAllowed && requestOrigin) {
-    headers.set('Access-Control-Allow-Origin', requestOrigin);
-  }
-
-  Object.entries(customHeaders).forEach(([key, value]) => {
-    headers.set(key, value);
-  });
-
-  return headers;
-};
-
 const errorResponse = (message, status, options = {}) => {
-  const headers = buildHeaders(options);
+  const headers = new Headers(options);
   return new Response(JSON.stringify({ error: message }), {
     status,
     headers
@@ -43,20 +18,21 @@ export async function GET(request) {
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
-  const requestOrigin = request.headers.get('Origin');
-  const isOriginAllowed = !requestOrigin || ALLOWED_ORIGINS.includes(requestOrigin);
+  const requestOrigin = request.headers.get('Origin')
   const commonHeadersOptions = {
-    originAllowed: isOriginAllowed,
-    requestOrigin
+    'Content-Type': 'application/json',
+    'Cache-Control': `public, max-age=${DEFAULT_CACHE_MAX_AGE}`,
+    'Origin-Allowed': !requestOrigin || ALLOWED_ORIGINS.includes(requestOrigin),
+    'Request-Origin': requestOrigin,
   };
 
   if (request.method === 'OPTIONS') {
-    const headers = buildHeaders({
+    const headers = new Headers({
       ...commonHeadersOptions,
-      cacheControl: 'public, max-age=86400'
+      'Cache-Control': 'public, max-age=86400',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
     });
-    headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     
     return new Response(null, { headers });
   }
@@ -77,11 +53,10 @@ export async function GET(request) {
     console.log('Request to:', fullUrl.toString());
 
     const apiResponse = await fetch(fullUrl, {
-      headers: buildHeaders({
-        customHeaders: {
-          'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
-          'Accept': 'application/json'
-        }
+      headers: new Headers({
+        ...commonHeadersOptions,
+        'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
+        'Accept': 'application/json'
       })
     });
 
@@ -91,7 +66,7 @@ export async function GET(request) {
     }
 
     const data = await apiResponse.json();
-    const headers = buildHeaders(commonHeadersOptions);
+    const headers = new Headers(commonHeadersOptions);
     
     return new Response(JSON.stringify(data), { headers });
 
@@ -99,7 +74,7 @@ export async function GET(request) {
     console.error('API failure:', error);
     return errorResponse(error.message, 500, {
       ...commonHeadersOptions,
-      requestOrigin: ALLOWED_ORIGINS[0] || '*'
+      'Request-Origin': ALLOWED_ORIGINS[0] || '*'
     });
   }
 }
