@@ -19,12 +19,12 @@ export async function GET(request) {
   const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
   const requestOrigin = request.headers.get('Origin')
-  const commonHeadersOptions = {
+  const commonHeadersOptions = new Headers({
     'Content-Type': 'application/json',
     'Cache-Control': `public, max-age=${DEFAULT_CACHE_MAX_AGE}`,
     'Origin-Allowed': !requestOrigin || ALLOWED_ORIGINS.includes(requestOrigin),
     'Request-Origin': requestOrigin,
-  };
+  });
 
   if (request.method === 'OPTIONS') {
     const headers = new Headers({
