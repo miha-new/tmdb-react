@@ -67,6 +67,8 @@ class ValidationHandler extends Handler {
 class CacheHandler extends Handler {
   async handle(request) {
     const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
     const fullUrl = new URL(path, process.env.API_URL).toString();
 
     if (method === 'GET') {
