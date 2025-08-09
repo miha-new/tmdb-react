@@ -11,10 +11,9 @@ const isValidPath = (path) => {
   }
 };
 
-// Логирование запросов и ошибок
-// const logRequest = (method, path, status, error = null) => {
-//   console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
-// };
+const logRequest = (method, path, status, error = null) => {
+  console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
+};
 
 async function handlerMethod(request) {
   const { method } = request;
@@ -25,7 +24,7 @@ async function handlerMethod(request) {
   const path = searchParams.get('path');
 
   if (!path || !isValidPath(path)) {
-    // logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
+    logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
     return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
@@ -33,7 +32,7 @@ async function handlerMethod(request) {
   const cacheKey = `${method}:${fullUrl}`;
 
   if (method === 'GET' && cache.has(cacheKey)) {
-    // logRequest(method, fullUrl, 200);
+    logRequest(method, fullUrl, 200);
     return new Response(JSON.stringify(cache.get(cacheKey)), { status: 200 });
   }
 
@@ -43,17 +42,17 @@ async function handlerMethod(request) {
       'Accept': 'application/json',
     });
 
-    // if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-    //   const body = await request.json();
-    //   options.body = JSON.stringify(body);
-    //   headers.set('Content-Type', 'application/json');
-    // }
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      const body = await request.json();
+      options.body = JSON.stringify(body);
+      headers.set('Content-Type', 'application/json');
+    }
 
     const apiResponse = await fetch(fullUrl, { method, headers });
 
     if (!apiResponse.ok) {
-      // const errorText = await apiResponse.text();
-      // logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
+      const errorText = await apiResponse.text();
+      logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
       throw new Error(`API returned ${apiResponse.status}: ${apiResponse.statusText}`);
     }
 
@@ -63,17 +62,17 @@ async function handlerMethod(request) {
       cache.set(cacheKey, data);
     }
 
-    // logRequest(method, fullUrl, 200);
+    logRequest(method, fullUrl, 200);
     return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (error) {
-    // logRequest(method, fullUrl, 500, error);
+    logRequest(method, fullUrl, 500, error);
     return new Response(JSON.stringify({ error: error.message || 'Internal server error' }), { status: 500 });
   }
 }
 
 export const GET = handlerMethod;
-// export const POST = handlerMethod;
-// export const PUT = handlerMethod;
-// export const PATCH = handlerMethod;
-// export const DELETE = handlerMethod;
+export const POST = handlerMethod;
+export const PUT = handlerMethod;
+export const PATCH = handlerMethod;
+export const DELETE = handlerMethod;
