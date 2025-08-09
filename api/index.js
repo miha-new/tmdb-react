@@ -62,16 +62,6 @@ class MethodValidationHandler extends Handler {
   }
 }
 
-class RequestContext {
-  constructor(request) {
-    this.request = request;
-    const { searchParams } = new URL(request.url);
-    this.path = searchParams.get('path');
-    this.method = request.method;
-    this.fullUrl = this.path ? new URL(this.path, process.env.API_URL).toString() : null;
-  }
-}
-
 class ValidationHandler extends Handler {
   constructor(apiUrl, nextHandler = null) {
     super(nextHandler);
@@ -79,9 +69,10 @@ class ValidationHandler extends Handler {
   }
 
   async handle(request) {
-    const ctx = new RequestContext(request);
-    
-    if (!ctx.path || !this.isValidPath(ctx.path)) {
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+
+    if (!path || !this.isValidPath(path)) {
       throw { status: 400, message: 'Invalid or missing "path" parameter' };
     }
 
@@ -105,30 +96,29 @@ class CacheHandler extends Handler {
   }
 
   async handle(request) {
-    const ctx = new RequestContext(request);
+    const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    const fullUrl = new URL(path, process.env.API_URL).toString();
 
-    if (ctx.method === 'GET') {
-      const cachedResponse = this.cache.get(`GET:${ctx.fullUrl}`);
+    if (method === 'GET') {
+      const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
-        // Возвращаем кэшированный ответ как есть
+        // Возвращаем кэшированный Response как есть
         return cachedResponse;
       }
     }
 
     const response = await super.handle(request);
 
-    if (ctx.method === 'GET' && response) {
-      // Клонируем response перед чтением
-      const responseClone = response.clone();
+    if (method === 'GET' && response) {
+      // Клонируем response для кэширования, чтобы не нарушать поток
+      const responseToCache = response.clone();
       try {
-        const data = await responseClone.json();
-        // Кэшируем новый Response с теми же headers
-        this.cache.set(`GET:${ctx.fullUrl}`, new Response(JSON.stringify(data), {
-          status: response.status,
-          headers: response.headers
-        }));
+        // Сохраняем весь Response в кэш, а не только данные
+        this.cache.set(`GET:${fullUrl}`, responseToCache);
       } catch (error) {
-        console.warn('Failed to cache response:', error);
+        console.error('Failed to cache response:', error);
       }
     }
 
@@ -136,54 +126,56 @@ class CacheHandler extends Handler {
   }
 }
 
+// Добавьте новый класс-обработчик
 class CorsHandler extends Handler {
   constructor(nextHandler = null) {
     super(nextHandler);
   }
 
   async handle(request) {
+    // Обработка preflight запроса
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400',
+          'Access-Control-Max-Age': '86400', // Кэшировать preflight на 24 часа
         }
       });
     }
 
     const response = await super.handle(request);
     
-    // Добавляем CORS заголовки к оригинальному ответу
-    const headers = new Headers(response.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
+    // Добавляем CORS заголовки к основному ответу
+    const modifiedResponse = new Response(response.body, response);
+    modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
     
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
+    return modifiedResponse;
   }
 }
 
 class ApiFetchHandler extends Handler {
   async handle(request) {
-    const ctx = new RequestContext(request);
-    
+    const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    const fullUrl = new URL(path, process.env.API_URL).toString();
+
     const headers = new Headers({
       'Authorization': `Bearer ${process.env.API_ACCESS_TOKEN}`,
       'Accept': 'application/json',
     });
 
-    const options = { method: ctx.method, headers };
+    const options = { method, headers };
 
-    if (['POST', 'PUT', 'PATCH'].includes(ctx.method)) {
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
       const body = await request.json();
       options.body = JSON.stringify(body);
       headers.set('Content-Type', 'application/json');
     }
 
-    const apiResponse = await fetch(ctx.fullUrl, options);
+    const apiResponse = await fetch(fullUrl, options);
 
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text();
@@ -201,15 +193,18 @@ class LoggingHandler extends Handler {
   }
 
   async handle(request) {
-    const ctx = new RequestContext(request);
+    const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    const fullUrl = path ? new URL(path, process.env.API_URL).toString() : '';
 
     try {
       const response = await super.handle(request);
-      this.logger.log(ctx.method, ctx.fullUrl, 200);
+      this.logger.log(method, fullUrl, 200);
       return response;
     } catch (error) {
       const status = error.status || 500;
-      this.logger.log(ctx.method, ctx.fullUrl, status, error);
+      this.logger.log(method, fullUrl, status, error);
       throw error;
     }
   }
