@@ -2,14 +2,18 @@ export const runtime = 'edge';
 
 const cache = new Map();
 
+const sanitizePath = (path) => {
+  // Удаляем начальные и конечные слэши, затем добавляем один в начало
+  return '/' + path.replace(/^\/+|\/+$/g, '');
+};
+
 const isValidPath = (path) => {
   try {
-    // Проверяем, что path является строкой и не содержит опасных символов
+    // Проверяем что path является непустой строкой без протокола
     return typeof path === 'string' && 
-           path.length > 0 && 
-           !path.includes('//') && 
-           !path.startsWith('http://') && 
-           !path.startsWith('https://');
+           path.length > 0 &&
+           !path.includes('://') &&
+           !path.includes('//');
   } catch {
     return false;
   }
@@ -24,27 +28,32 @@ export default async function handler(request) {
   const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
+  // Проверяем что API_URL корректный
+  if (!API_URL || !API_URL.startsWith('http')) {
+    logRequest(method, 'INVALID_API_URL', 500, new Error('Invalid API URL configuration'));
+    return new Response(JSON.stringify({ error: 'Server configuration error' }), { status: 500 });
+  }
+
   const { searchParams } = new URL(request.url);
-  let path = searchParams.get('path');
+  const path = searchParams.get('path');
 
   if (!path || !isValidPath(path)) {
-    logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
+    logRequest(method, path || 'empty', 400, new Error('Invalid or missing "path" parameter'));
     return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
-  // Добавляем / в начало, если его нет
-  if (!path.startsWith('/')) {
-    path = '/' + path;
+  // Создаем базовый URL API
+  let baseApiUrl;
+  try {
+    baseApiUrl = new URL(API_URL);
+  } catch (error) {
+    logRequest(method, 'INVALID_API_URL', 500, error);
+    return new Response(JSON.stringify({ error: 'Invalid API URL configuration' }), { status: 500 });
   }
 
-  // Формируем полный URL
-  let fullUrl;
-  try {
-    fullUrl = new URL(API_URL + path);
-  } catch (error) {
-    logRequest(method, path, 400, error);
-    return new Response(JSON.stringify({ error: 'Invalid API URL configuration' }), { status: 400 });
-  }
+  // Очищаем и добавляем путь к базовому URL
+  const sanitizedPath = sanitizePath(path);
+  const fullUrl = new URL(sanitizedPath, baseApiUrl);
 
   const cacheKey = `${method}:${fullUrl}`;
 
