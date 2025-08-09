@@ -1,91 +1,47 @@
 export const runtime = 'edge';
 
-const cache = new Map();
+// Кеш для GET-запросов (простой in-memory cache)
+// const cache = new Map();
 
-const normalizePath = (path) => {
-  // Удаляем все начальные и конечные слэши
-  path = path.replace(/^\/+|\/+$/g, '');
-  return path ? `/${path}` : '/';
-};
+// Валидация URL (защита от SSRF и неверных путей)
+// const isValidPath = (path) => {
+//   try {
+//     const url = new URL(path, process.env.API_URL);
+//     return url.hostname === new URL(process.env.API_URL).hostname;
+//   } catch {
+//     return false;
+//   }
+// };
 
-const isValidPath = (path) => {
-  try {
-    return typeof path === 'string' && 
-           path.length > 0 &&
-           !path.includes('://') && // Защита от абсолютных URL
-           !path.includes('..') &&  // Защита от path traversal
-           !/\/\/+/.test(path);     // Запрет множественных слэшей
-  } catch {
-    return false;
-  }
-};
-
+// Логирование запросов и ошибок
 const logRequest = (method, path, status, error = null) => {
   console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
 };
 
-const ensureValidBaseUrl = (url) => {
-  try {
-    // Если URL не содержит протокол, добавляем https://
-    if (!url.includes('://')) {
-      url = `https://${url}`;
-    }
-    const parsed = new URL(url);
-    // Убедимся, что URL заканчивается на слэш
-    if (!parsed.pathname.endsWith('/')) {
-      parsed.pathname += '/';
-    }
-    return parsed.toString();
-  } catch (error) {
-    throw new Error(`Invalid base URL: ${url}`);
-  }
-};
-
-export default async function handler(request) {
+// Обработчик для всех методов
+export default async function handlerMethod(request) {
   const { method } = request;
+  const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
-  // Проверяем и нормализуем базовый URL
-  let baseUrl;
-  try {
-    baseUrl = ensureValidBaseUrl(process.env.API_URL);
-  } catch (error) {
-    logRequest(method, 'INVALID_API_URL', 500, error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
-
   const { searchParams } = new URL(request.url);
-  const pathParam = searchParams.get('path');
+  const path = searchParams.get('path');
 
-  if (!pathParam || !isValidPath(pathParam)) {
-    logRequest(method, pathParam || 'empty', 400, new Error('Invalid or missing "path" parameter'));
+  // Валидация параметров
+  // if (!path || !isValidPath(path)) {
+  if (!path) {
+    logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
     return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
-  // Нормализуем путь
-  const normalizedPath = normalizePath(pathParam);
-  
-  // Формируем полный URL
-  let fullUrl;
-  try {
-    fullUrl = new URL(normalizedPath, baseUrl);
-  } catch (error) {
-    logRequest(method, normalizedPath, 400, error);
-    return new Response(JSON.stringify({ error: 'Failed to construct API URL' }), { status: 400 });
-  }
+  const fullUrl = new URL(path, API_URL);
+  // const cacheKey = `${method}:${fullUrl}`;
 
-  // Проверяем что конечный URL принадлежит нашему домену
-  if (fullUrl.origin !== new URL(baseUrl).origin) {
-    logRequest(method, fullUrl.toString(), 400, new Error('Invalid URL origin'));
-    return new Response(JSON.stringify({ error: 'Invalid path parameter' }), { status: 400 });
-  }
-
-  const cacheKey = `${method}:${fullUrl}`;
-
-  if (method === 'GET' && cache.has(cacheKey)) {
-    logRequest(method, fullUrl.toString(), 200);
-    return new Response(JSON.stringify(cache.get(cacheKey)), { status: 200 });
-  }
+  // Кеширование GET-запросов
+  // if (method === 'GET' && cache.has(cacheKey)) {
+  //   logRequest(method, fullUrl, 200);
+  //   return new Response(JSON.stringify(cache.get(cacheKey)), { status: 200 });
+  // }
 
   try {
     const headers = new Headers({
@@ -93,42 +49,45 @@ export default async function handler(request) {
       'Accept': 'application/json',
     });
 
+    // Поддержка разных HTTP-методов
     const options = {
       method,
       headers,
     };
 
-    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-      const body = await request.json();
-      options.body = JSON.stringify(body);
-      headers.set('Content-Type', 'application/json');
-    }
+    // if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+    //   const body = await request.json();
+    //   options.body = JSON.stringify(body);
+    //   headers.set('Content-Type', 'application/json');
+    // }
 
     const apiResponse = await fetch(fullUrl, options);
 
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text();
-      logRequest(method, fullUrl.toString(), apiResponse.status, new Error(errorText));
+      logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
       throw new Error(`API returned ${apiResponse.status}: ${apiResponse.statusText}`);
     }
 
     const data = await apiResponse.json();
 
-    if (method === 'GET') {
-      cache.set(cacheKey, data);
-    }
+    // Кеширование успешных GET-ответов
+    // if (method === 'GET') {
+    //   cache.set(cacheKey, data);
+    // }
 
-    logRequest(method, fullUrl.toString(), 200);
+    logRequest(method, fullUrl, 200);
     return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (error) {
-    logRequest(method, fullUrl.toString(), 500, error);
+    logRequest(method, fullUrl, 500, error);
     return new Response(JSON.stringify({ error: error.message || 'Internal server error' }), { status: 500 });
   }
 }
 
-export const GET = handler;
-export const POST = handler;
-export const PUT = handler;
-export const PATCH = handler;
-export const DELETE = handler;
+// Поддержка разных HTTP-методов через один обработчик
+export const GET = handlerMethod;
+// export const POST = handlerMethod;
+// export const PUT = handlerMethod;
+// export const PATCH = handlerMethod;
+// export const DELETE = handlerMethod;
