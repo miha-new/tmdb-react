@@ -17,7 +17,9 @@ const logRequest = (method, path, status, error = null) => {
 
 export default async function handler(request) {
   const { method } = request;
-  const API_URL = process.env.API_URL;
+  const API_URL = process.env.API_URL?.endsWith('/') 
+    ? process.env.API_URL 
+    : process.env.API_URL + '/';
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
   const { searchParams } = new URL(request.url);
@@ -39,7 +41,6 @@ export default async function handler(request) {
   try {
     const headers = new Headers({
       'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
-      'Accept': 'application/json',
     });
 
     const options = {
