@@ -330,21 +330,21 @@ const apiHandler = new (class {
       new BodySizeHandler(
         MAX_BODY_SIZE,
         new ContentTypeHandler(
-          new CorsHandler(
-            new LoggingHandler(
-              logger,
-              new ValidationHandler(
-                process.env.API_URL,
-                new TimeoutHandler(
-                  API_TIMEOUT,
-                  new CacheHandler(
-                    cache,
-                    new ApiFetchHandler()
-                  )
+
+          new LoggingHandler(
+            logger,
+            new ValidationHandler(
+              process.env.API_URL,
+              new TimeoutHandler(
+                API_TIMEOUT,
+                new CacheHandler(
+                  cache,
+                  new ApiFetchHandler()
                 )
               )
             )
           )
+          
         )
       )
     );
