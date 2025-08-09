@@ -1,6 +1,6 @@
 export const runtime = 'edge';
 
-// Константы для повторного использования
+// Константы
 const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -10,14 +10,17 @@ const CORS_HEADERS = {
 const MAX_BODY_SIZE = 1024 * 1024 * 5; // 5MB
 const API_TIMEOUT = 10000; // 10 seconds
 
-// Утилитная функция для построения полного URL
+// Утилитные функции
 function getFullUrl(request) {
-  const { searchParams } = new URL(request.url);
-  const path = searchParams.get('path');
-  return path ? new URL(path, process.env.API_URL).toString() : null;
+  try {
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    return path ? new URL(path, process.env.API_URL).toString() : null;
+  } catch (e) {
+    return null;
+  }
 }
 
-// Генерация ключа кэша с учетом заголовков
 function generateCacheKey(request, fullUrl) {
   const headersKey = JSON.stringify({
     'accept': request.headers.get('accept'),
@@ -321,7 +324,6 @@ class LoggingHandler extends Handler {
   }
 }
 
-// Добавляем этот класс перед объявлением apiHandler
 class CorsHandler extends Handler {
   constructor(nextHandler = null) {
     super(nextHandler);
@@ -330,6 +332,7 @@ class CorsHandler extends Handler {
   async handle(request) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { 
+        status: 204,
         headers: {
           ...CORS_HEADERS,
           'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
@@ -340,24 +343,26 @@ class CorsHandler extends Handler {
     try {
       const response = await super.handle(request);
       
-      // Клонируем response чтобы добавить заголовки
-      const modifiedResponse = new Response(response.body, response);
-      
-      // Добавляем CORS заголовки
-      Object.entries({
-        ...CORS_HEADERS,
-        'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
-      }).forEach(([key, value]) => {
-        if (!modifiedResponse.headers.has(key)) {
-          modifiedResponse.headers.set(key, value);
+      // Клонируем ответ чтобы добавить заголовки
+      const headers = new Headers(response.headers);
+      Object.entries(CORS_HEADERS).forEach(([key, value]) => {
+        if (!headers.has(key)) {
+          headers.set(key, value);
         }
       });
+      headers.set('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
       
-      return modifiedResponse;
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      });
     } catch (error) {
-      // Обрабатываем ошибки с CORS заголовками
+      // Обрабатываем разные типы ошибок
       const status = error.status || 500;
-      const errorResponse = new Response(error.message || 'Internal Server Error', { 
+      const message = error.message || 'Internal Server Error';
+      
+      return new Response(message, {
         status,
         headers: {
           'Content-Type': 'text/plain',
@@ -365,12 +370,11 @@ class CorsHandler extends Handler {
           'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
         }
       });
-      
-      throw errorResponse;
     }
   }
 }
 
+// Главный обработчик
 const apiHandler = new (class {
   constructor() {
     const cache = new RequestCache();
@@ -380,7 +384,7 @@ const apiHandler = new (class {
       new BodySizeHandler(
         MAX_BODY_SIZE,
         new ContentTypeHandler(
-          new CorsHandler( // Теперь CorsHandler определен
+          new CorsHandler(
             new LoggingHandler(
               logger,
               new ValidationHandler(
@@ -401,13 +405,29 @@ const apiHandler = new (class {
   }
 
   async handle(request) {
-    return this.handler.handle(request);
+    try {
+      return await this.handler.handle(request);
+    } catch (error) {
+      // Финальная обработка непойманных ошибок
+      console.error('Unhandled error:', error);
+      return new Response('Internal Server Error', {
+        status: 500,
+        headers: {
+          'Content-Type': 'text/plain',
+          ...CORS_HEADERS
+        }
+      });
+    }
   }
 })();
 
-export const GET = (request) => apiHandler.handle(request);
-export const POST = (request) => apiHandler.handle(request);
-export const PUT = (request) => apiHandler.handle(request);
-export const PATCH = (request) => apiHandler.handle(request);
-export const DELETE = (request) => apiHandler.handle(request);
-export const OPTIONS = (request) => apiHandler.handle(request);
+export default async function handler(request) {
+  return apiHandler.handle(request);
+}
+
+export const GET = handler;
+export const POST = handler;
+export const PUT = handler;
+export const PATCH = handler;
+export const DELETE = handler;
+export const OPTIONS = handler;
