@@ -6,7 +6,7 @@ const normalizePath = (path) => {
   // Удаляем все начальные и конечные слэши
   path = path.replace(/^\/+|\/+$/g, '');
   // Добавляем один слэш в начало
-  return '/' + path;
+  return path ? '/' + path : '/';
 };
 
 const isValidPath = (path) => {
@@ -31,9 +31,16 @@ export default async function handler(request) {
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
   // Проверяем что API_URL установлен и валиден
+  if (!API_URL) {
+    logRequest(method, 'MISSING_API_URL', 500, new Error('API_URL is not configured'));
+    return new Response(JSON.stringify({ error: 'Server configuration error' }), { status: 500 });
+  }
+
   let baseUrl;
   try {
-    baseUrl = new URL(API_URL);
+    // Добавляем протокол, если отсутствует
+    const urlToParse = API_URL.includes('://') ? API_URL : `https://${API_URL}`;
+    baseUrl = new URL(urlToParse);
   } catch (error) {
     logRequest(method, 'INVALID_API_URL', 500, error);
     return new Response(JSON.stringify({ error: 'Invalid API URL configuration' }), { status: 500 });
@@ -53,7 +60,9 @@ export default async function handler(request) {
   // Создаем полный URL безопасным способом
   let fullUrl;
   try {
-    fullUrl = new URL(normalizedPath, baseUrl);
+    // Убедимся, что baseUrl заканчивается на слэш
+    const baseUrlStr = baseUrl.toString().endsWith('/') ? baseUrl.toString() : `${baseUrl.toString()}/`;
+    fullUrl = new URL(normalizedPath.substring(1), baseUrlStr);
   } catch (error) {
     logRequest(method, normalizedPath, 400, error);
     return new Response(JSON.stringify({ error: 'Failed to construct API URL' }), { status: 400 });
