@@ -4,7 +4,6 @@ export const runtime = 'edge';
 const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', '),
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
@@ -75,7 +74,6 @@ class MethodValidationHandler extends Handler {
         headers: {
           'Allow': this.allowedMethods.join(', '),
           'Content-Type': 'text/plain',
-          ...CORS_HEADERS
         }
       });
     }
@@ -96,8 +94,7 @@ class ValidationHandler extends Handler {
     if (!path || !this.isValidPath(path)) {
       throw { 
         status: 400, 
-        message: 'Invalid or missing "path" parameter',
-        headers: CORS_HEADERS
+        message: 'Invalid or missing "path" parameter'
       };
     }
 
@@ -128,8 +125,7 @@ class CacheHandler extends Handler {
       const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
         return new Response(JSON.stringify(cachedResponse), { 
-          status: 200,
-          headers: CORS_HEADERS
+          status: 200
         });
       }
     }
@@ -140,8 +136,7 @@ class CacheHandler extends Handler {
       const data = await response.json();
       this.cache.set(`GET:${fullUrl}`, data);
       return new Response(JSON.stringify(data), { 
-        status: 200,
-        headers: CORS_HEADERS
+        status: 200
       });
     }
 
@@ -156,26 +151,42 @@ class CorsHandler extends Handler {
 
   async handle(request) {
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS });
+      return new Response(null, { 
+        headers: {
+          ...CORS_HEADERS,
+          'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+        } 
+      });
     }
 
     try {
       const response = await super.handle(request);
       const modifiedResponse = new Response(response.body, response);
-      Object.entries(CORS_HEADERS).forEach(([key, value]) => {
+      
+      // Добавляем CORS заголовки только если их еще нет
+      Object.entries({
+        ...CORS_HEADERS,
+        'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+      }).forEach(([key, value]) => {
         if (!modifiedResponse.headers.has(key)) {
           modifiedResponse.headers.set(key, value);
         }
       });
+      
       return modifiedResponse;
     } catch (error) {
       const response = new Response(error.message, { 
-        status: error.status || 500,
-        headers: {
-          ...(error.headers || {}),
-          ...CORS_HEADERS
-        }
+        status: error.status || 500
       });
+      
+      // Добавляем CORS заголовки к ошибке
+      Object.entries({
+        ...CORS_HEADERS,
+        'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+      }).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
       throw response;
     }
   }
@@ -201,8 +212,7 @@ class ApiFetchHandler extends Handler {
       } catch (e) {
         throw { 
           status: 400, 
-          message: 'Invalid JSON body',
-          headers: CORS_HEADERS
+          message: 'Invalid JSON body'
         };
       }
     }
@@ -213,8 +223,7 @@ class ApiFetchHandler extends Handler {
       const errorText = await apiResponse.text();
       throw { 
         status: apiResponse.status, 
-        message: errorText,
-        headers: CORS_HEADERS
+        message: errorText
       };
     }
 
