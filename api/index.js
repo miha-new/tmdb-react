@@ -2,18 +2,20 @@ export const runtime = 'edge';
 
 const cache = new Map();
 
-const sanitizePath = (path) => {
-  // Удаляем начальные и конечные слэши, затем добавляем один в начало
-  return '/' + path.replace(/^\/+|\/+$/g, '');
+const normalizePath = (path) => {
+  // Удаляем все начальные и конечные слэши
+  path = path.replace(/^\/+|\/+$/g, '');
+  // Добавляем один слэш в начало
+  return '/' + path;
 };
 
 const isValidPath = (path) => {
   try {
-    // Проверяем что path является непустой строкой без протокола
     return typeof path === 'string' && 
            path.length > 0 &&
-           !path.includes('://') &&
-           !path.includes('//');
+           !path.includes('://') && // Защита от абсолютных URL
+           !path.includes('..') &&  // Защита от path traversal
+           !/\/\/+/.test(path);     // Запрет множественных слэшей
   } catch {
     return false;
   }
@@ -28,32 +30,40 @@ export default async function handler(request) {
   const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
-  // Проверяем что API_URL корректный
-  if (!API_URL || !API_URL.startsWith('http')) {
-    logRequest(method, 'INVALID_API_URL', 500, new Error('Invalid API URL configuration'));
-    return new Response(JSON.stringify({ error: 'Server configuration error' }), { status: 500 });
-  }
-
-  const { searchParams } = new URL(request.url);
-  const path = searchParams.get('path');
-
-  if (!path || !isValidPath(path)) {
-    logRequest(method, path || 'empty', 400, new Error('Invalid or missing "path" parameter'));
-    return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
-  }
-
-  // Создаем базовый URL API
-  let baseApiUrl;
+  // Проверяем что API_URL установлен и валиден
+  let baseUrl;
   try {
-    baseApiUrl = new URL(API_URL);
+    baseUrl = new URL(API_URL);
   } catch (error) {
     logRequest(method, 'INVALID_API_URL', 500, error);
     return new Response(JSON.stringify({ error: 'Invalid API URL configuration' }), { status: 500 });
   }
 
-  // Очищаем и добавляем путь к базовому URL
-  const sanitizedPath = sanitizePath(path);
-  const fullUrl = new URL(sanitizedPath, baseApiUrl);
+  const { searchParams } = new URL(request.url);
+  const pathParam = searchParams.get('path');
+
+  if (!pathParam || !isValidPath(pathParam)) {
+    logRequest(method, pathParam || 'empty', 400, new Error('Invalid or missing "path" parameter'));
+    return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
+  }
+
+  // Нормализуем путь
+  const normalizedPath = normalizePath(pathParam);
+  
+  // Создаем полный URL безопасным способом
+  let fullUrl;
+  try {
+    fullUrl = new URL(normalizedPath, baseUrl);
+  } catch (error) {
+    logRequest(method, normalizedPath, 400, error);
+    return new Response(JSON.stringify({ error: 'Failed to construct API URL' }), { status: 400 });
+  }
+
+  // Проверяем что конечный URL принадлежит нашему домену
+  if (fullUrl.origin !== baseUrl.origin) {
+    logRequest(method, fullUrl.toString(), 400, new Error('Invalid URL origin'));
+    return new Response(JSON.stringify({ error: 'Invalid path parameter' }), { status: 400 });
+  }
 
   const cacheKey = `${method}:${fullUrl}`;
 
