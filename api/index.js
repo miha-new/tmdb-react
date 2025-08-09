@@ -16,10 +16,13 @@ class RequestCache {
 
 class RequestLogger {
   log(method, path, status, error = null) {
-    console.log(
-      `[${new Date().toISOString()}] ${method} ${path} -> ${status}`,
-      error ? `\nERROR: ${error.message}` : ''
-    );
+    const message = `[${new Date().toISOString()}] ${method} ${path} -> ${status}`;
+    
+    if (error) {
+      console.error(message, `\nERROR: ${error.message}`);
+    } else {
+      console.log(message);
+    }
   }
 }
 
