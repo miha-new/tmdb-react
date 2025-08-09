@@ -16,13 +16,10 @@ class RequestCache {
 
 class RequestLogger {
   log(method, path, status, error = null) {
-    const message = `[${new Date().toISOString()}] ${method} ${path} -> ${status}`;
-    
-    if (error) {
-      console.error(message, `\nERROR: ${error.message}`);
-    } else {
-      console.log(message);
-    }
+    console.log(
+      `[${new Date().toISOString()}] ${method} ${path} -> ${status}`,
+      error ? `\nERROR: ${error.message}` : ''
+    );
   }
 }
 
@@ -158,13 +155,11 @@ const apiHandler = new (class {
     const logger = new RequestLogger();
     this.handler = new LoggingHandler(
       logger,
-      new RateLimitHandler( // Добавляем перед ValidationHandler
-        new ValidationHandler(
-          process.env.API_URL,
-          new CacheHandler(
-            cache,
-            new ApiFetchHandler()
-          )
+      new ValidationHandler(
+        process.env.API_URL,
+        new CacheHandler(
+          cache,
+          new ApiFetchHandler()
         )
       )
     );
