@@ -1,51 +1,83 @@
 export const runtime = 'edge';
 
-export async function GET(request) {
-  // 1. Получаем переменные окружения
+const cache = new Map();
+
+const isValidPath = (path) => {
+  try {
+    const url = new URL(path, process.env.API_URL);
+    return url.hostname === new URL(process.env.API_URL).hostname;
+  } catch {
+    return false;
+  }
+};
+
+const logRequest = (method, path, status, error = null) => {
+  console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
+};
+
+export default async function handler(request) {
+  const { method } = request;
   const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
-  // 5. Получаем path из URL
   const { searchParams } = new URL(request.url);
   const path = searchParams.get('path');
 
-  if (!path) {
-    return new Response(JSON.stringify({ error: 'Missing "path" parameter' }), {
-      status: 400
-    });
+  if (!path || !isValidPath(path)) {
+    logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
+    return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
-  // 7. Формируем итоговый URL
   const fullUrl = new URL(path, API_URL);
+  const cacheKey = `${method}:${fullUrl}`;
+
+  if (method === 'GET' && cache.has(cacheKey)) {
+    logRequest(method, fullUrl, 200);
+    return new Response(JSON.stringify(cache.get(cacheKey)), { status: 200 });
+  }
 
   try {
-    // 8. Отправляем запрос к API
-    const apiResponse = await fetch(fullUrl, {
-      headers: new Headers({
-        'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
-        'Accept': 'application/json',
-      }),
+    const headers = new Headers({
+      'Authorization': `Bearer ${API_ACCESS_TOKEN}`,
+      'Accept': 'application/json',
     });
 
-    // 9. Проверяем статус ответа
+    const options = {
+      method,
+      headers,
+    };
+
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      const body = await request.json();
+      options.body = JSON.stringify(body);
+      headers.set('Content-Type', 'application/json');
+    }
+
+    const apiResponse = await fetch(fullUrl, options);
+
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text();
-      console.error('[ERROR] API response:', errorText);
+      logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
       throw new Error(`API returned ${apiResponse.status}: ${apiResponse.statusText}`);
     }
 
-    // 10. Возвращаем данные
     const data = await apiResponse.json();
-    return new Response(JSON.stringify(data), {
-      status: 200
-    });
+
+    if (method === 'GET') {
+      cache.set(cacheKey, data);
+    }
+
+    logRequest(method, fullUrl, 200);
+    return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (error) {
-    // 11. Обрабатываем ошибки
-    return new Response(JSON.stringify({ 
-      error: error.message || 'Internal server error' 
-    }), {
-      status: 500
-    });
+    logRequest(method, fullUrl, 500, error);
+    return new Response(JSON.stringify({ error: error.message || 'Internal server error' }), { status: 500 });
   }
 }
+
+export const GET = handler;
+export const POST = handler;
+export const PUT = handler;
+export const PATCH = handler;
+export const DELETE = handler;
