@@ -4,8 +4,7 @@ const cache = new Map();
 
 const isValidPath = (path) => {
   try {
-    const url = new URL(path, process.env.API_URL);
-    return url.hostname === new URL(process.env.API_URL).hostname;
+    return typeof path === 'string' && path.startsWith('/') && !path.includes('//');
   } catch {
     return false;
   }
@@ -17,9 +16,7 @@ const logRequest = (method, path, status, error = null) => {
 
 export default async function handler(request) {
   const { method } = request;
-  const API_URL = process.env.API_URL?.endsWith('/') 
-    ? process.env.API_URL 
-    : process.env.API_URL + '/';
+  const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
   const { searchParams } = new URL(request.url);
@@ -30,7 +27,8 @@ export default async function handler(request) {
     return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
-  const fullUrl = new URL(path, API_URL);
+  const fullUrl = new URL(`${API_URL}${path.startsWith('/') ? path : `/${path}`}`);
+
   const cacheKey = `${method}:${fullUrl}`;
 
   if (method === 'GET' && cache.has(cacheKey)) {
