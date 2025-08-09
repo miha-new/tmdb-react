@@ -14,9 +14,9 @@ export const runtime = 'edge';
 // };
 
 // Логирование запросов и ошибок
-const logRequest = (method, path, status, error = null) => {
-  console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
-};
+// const logRequest = (method, path, status, error = null) => {
+//   console.log(`[${new Date().toISOString()}] ${method} ${path} -> ${status}`, error ? `\nERROR: ${error.message}` : '');
+// };
 
 // Обработчик для всех методов
 export default async function handlerMethod(request) {
@@ -30,7 +30,7 @@ export default async function handlerMethod(request) {
   // Валидация параметров
   // if (!path || !isValidPath(path)) {
   if (!path) {
-    logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
+    // logRequest(method, path, 400, new Error('Invalid or missing "path" parameter'));
     return new Response(JSON.stringify({ error: 'Invalid or missing "path" parameter' }), { status: 400 });
   }
 
@@ -64,8 +64,8 @@ export default async function handlerMethod(request) {
     const apiResponse = await fetch(fullUrl, options);
 
     if (!apiResponse.ok) {
-      const errorText = await apiResponse.text();
-      logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
+      // const errorText = await apiResponse.text();
+      // logRequest(method, fullUrl, apiResponse.status, new Error(errorText));
       throw new Error(`API returned ${apiResponse.status}: ${apiResponse.statusText}`);
     }
 
@@ -76,11 +76,11 @@ export default async function handlerMethod(request) {
     //   cache.set(cacheKey, data);
     // }
 
-    logRequest(method, fullUrl, 200);
+    // logRequest(method, fullUrl, 200);
     return new Response(JSON.stringify(data), { status: 200 });
 
   } catch (error) {
-    logRequest(method, fullUrl, 500, error);
+    // logRequest(method, fullUrl, 500, error);
     return new Response(JSON.stringify({ error: error.message || 'Internal server error' }), { status: 500 });
   }
 }
