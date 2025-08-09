@@ -1,8 +1,18 @@
 export const runtime = 'edge';
 
+// Константы для повторного использования
+const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', '),
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
 class RequestCache {
-  constructor() {
+  constructor(maxSize = 100) {
     this.cache = new Map();
+    this.maxSize = maxSize;
   }
 
   get(key) {
@@ -10,6 +20,11 @@ class RequestCache {
   }
 
   set(key, value) {
+    // Очистка старых записей при достижении лимита
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
     this.cache.set(key, value);
   }
 }
@@ -40,7 +55,7 @@ class Handler {
 }
 
 class MethodValidationHandler extends Handler {
-  constructor(allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], nextHandler = null) {
+  constructor(allowedMethods = ALLOWED_METHODS, nextHandler = null) {
     super(nextHandler);
     this.allowedMethods = allowedMethods;
   }
@@ -53,7 +68,8 @@ class MethodValidationHandler extends Handler {
         status: 405,
         headers: {
           'Allow': this.allowedMethods.join(', '),
-          'Content-Type': 'text/plain'
+          'Content-Type': 'text/plain',
+          ...CORS_HEADERS // Добавляем CORS заголовки к ошибке
         }
       });
     }
@@ -73,7 +89,11 @@ class ValidationHandler extends Handler {
     const path = searchParams.get('path');
 
     if (!path || !this.isValidPath(path)) {
-      throw { status: 400, message: 'Invalid or missing "path" parameter' };
+      throw { 
+        status: 400, 
+        message: 'Invalid or missing "path" parameter',
+        headers: CORS_HEADERS // Добавляем CORS заголовки к ошибке
+      };
     }
 
     return super.handle(request);
@@ -104,7 +124,10 @@ class CacheHandler extends Handler {
     if (method === 'GET') {
       const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
-        return new Response(JSON.stringify(cachedResponse), { status: 200 });
+        return new Response(JSON.stringify(cachedResponse), { 
+          status: 200,
+          headers: CORS_HEADERS
+        });
       }
     }
 
@@ -113,14 +136,16 @@ class CacheHandler extends Handler {
     if (method === 'GET' && response) {
       const data = await response.json();
       this.cache.set(`GET:${fullUrl}`, data);
-      return new Response(JSON.stringify(data), { status: 200 });
+      return new Response(JSON.stringify(data), { 
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     return response;
   }
 }
 
-// Добавьте новый класс-обработчик
 class CorsHandler extends Handler {
   constructor(nextHandler = null) {
     super(nextHandler);
@@ -128,25 +153,28 @@ class CorsHandler extends Handler {
 
   async handle(request) {
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400',
-        }
-      });
+      return new Response(null, { headers: CORS_HEADERS });
     }
 
     try {
       const response = await super.handle(request);
       const modifiedResponse = new Response(response.body, response);
-      modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
+      // Добавляем CORS заголовки, если их еще нет
+      Object.entries(CORS_HEADERS).forEach(([key, value]) => {
+        if (!modifiedResponse.headers.has(key)) {
+          modifiedResponse.headers.set(key, value);
+        }
+      });
       return modifiedResponse;
     } catch (error) {
-      const response = new Response(error.message, { status: error.status || 500 });
-      response.headers.set('Access-Control-Allow-Origin', '*');
-      throw response; // Или return response;
+      const response = new Response(error.message, { 
+        status: error.status || 500,
+        headers: {
+          ...(error.headers || {}),
+          ...CORS_HEADERS
+        }
+      });
+      throw response;
     }
   }
 }
@@ -166,16 +194,28 @@ class ApiFetchHandler extends Handler {
     const options = { method, headers };
 
     if (['POST', 'PUT', 'PATCH'].includes(method)) {
-      const body = await request.json();
-      options.body = JSON.stringify(body);
-      headers.set('Content-Type', 'application/json');
+      try {
+        const body = await request.json();
+        options.body = JSON.stringify(body);
+        headers.set('Content-Type', 'application/json');
+      } catch (e) {
+        throw { 
+          status: 400, 
+          message: 'Invalid JSON body',
+          headers: CORS_HEADERS
+        };
+      }
     }
 
     const apiResponse = await fetch(fullUrl, options);
 
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text();
-      throw { status: apiResponse.status, message: errorText };
+      throw { 
+        status: apiResponse.status, 
+        message: errorText,
+        headers: CORS_HEADERS
+      };
     }
 
     return apiResponse;
@@ -196,7 +236,7 @@ class LoggingHandler extends Handler {
 
     try {
       const response = await super.handle(request);
-      this.logger.log(method, fullUrl, 200);
+      this.logger.log(method, fullUrl, response.status);
       return response;
     } catch (error) {
       const status = error.status || 500;
@@ -211,7 +251,7 @@ const apiHandler = new (class {
     const cache = new RequestCache();
     const logger = new RequestLogger();
     this.handler = new MethodValidationHandler(
-      ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      ALLOWED_METHODS, // Используем константу
       new CorsHandler(
         new LoggingHandler(
           logger,
