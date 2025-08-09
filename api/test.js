@@ -12,10 +12,6 @@ class RequestCache {
   set(key, value) {
     this.cache.set(key, value);
   }
-
-  clear() {
-    this.cache.clear();
-  }
 }
 
 class RequestLogger {
@@ -27,15 +23,34 @@ class RequestLogger {
   }
 }
 
-class RequestValidator {
-  constructor(apiUrl) {
+class Handler {
+  constructor(nextHandler = null) {
+    this.next = nextHandler;
+  }
+
+  async handle(request) {
+    if (this.next) {
+      return this.next.handle(request);
+    }
+    return null;
+  }
+}
+
+class ValidationHandler extends Handler {
+  constructor(apiUrl, nextHandler = null) {
+    super(nextHandler);
     this.apiUrl = apiUrl;
   }
 
-  validate(path) {
+  async handle(request) {
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+
     if (!path || !this.isValidPath(path)) {
       throw { status: 400, message: 'Invalid or missing "path" parameter' };
     }
+
+    return super.handle(request);
   }
 
   isValidPath(path) {
@@ -48,50 +63,44 @@ class RequestValidator {
   }
 }
 
-class ApiHandler {
-  constructor() {
-    this.cache = new RequestCache();
-    this.logger = new RequestLogger();
-    this.validator = new RequestValidator(process.env.API_URL);
+class CacheHandler extends Handler {
+  constructor(cache, nextHandler = null) {
+    super(nextHandler);
+    this.cache = cache;
   }
 
   async handle(request) {
     const { method } = request;
     const { searchParams } = new URL(request.url);
     const path = searchParams.get('path');
+    const fullUrl = new URL(path, process.env.API_URL).toString();
 
-    try {
-      this.validator.validate(path);
-      const fullUrl = new URL(path, process.env.API_URL).toString();
-
-      if (method === 'GET') {
-        const cachedResponse = this.cache.get(`GET:${fullUrl}`);
-        if (cachedResponse) {
-          this.logger.log(method, fullUrl, 200);
-          return new Response(JSON.stringify(cachedResponse), { status: 200 });
-        }
+    if (method === 'GET') {
+      const cachedResponse = this.cache.get(`GET:${fullUrl}`);
+      if (cachedResponse) {
+        return new Response(JSON.stringify(cachedResponse), { status: 200 });
       }
-
-      const apiResponse = await this.fetchApi(request, fullUrl);
-      const data = await apiResponse.json();
-
-      if (method === 'GET') {
-        this.cache.set(`GET:${fullUrl}`, data);
-      }
-
-      this.logger.log(method, fullUrl, 200);
-      return new Response(JSON.stringify(data), { status: 200 });
-
-    } catch (error) {
-      const status = error.status || 500;
-      const fullUrl = path ? new URL(path, process.env.API_URL).toString() : '';
-      this.logger.log(method, fullUrl, status, error);
-      return new Response(JSON.stringify({ error: error.message }), { status });
     }
-  }
 
-  async fetchApi(request, fullUrl) {
+    const response = await super.handle(request);
+
+    if (method === 'GET' && response) {
+      const data = await response.json();
+      this.cache.set(`GET:${fullUrl}`, data);
+      return new Response(JSON.stringify(data), { status: 200 });
+    }
+
+    return response;
+  }
+}
+
+class ApiFetchHandler extends Handler {
+  async handle(request) {
     const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    const fullUrl = new URL(path, process.env.API_URL).toString();
+
     const headers = new Headers({
       'Authorization': `Bearer ${process.env.API_ACCESS_TOKEN}`,
       'Accept': 'application/json',
@@ -116,7 +125,50 @@ class ApiHandler {
   }
 }
 
-const apiHandler = new ApiHandler();
+class LoggingHandler extends Handler {
+  constructor(logger, nextHandler = null) {
+    super(nextHandler);
+    this.logger = logger;
+  }
+
+  async handle(request) {
+    const { method } = request;
+    const { searchParams } = new URL(request.url);
+    const path = searchParams.get('path');
+    const fullUrl = path ? new URL(path, process.env.API_URL).toString() : '';
+
+    try {
+      const response = await super.handle(request);
+      this.logger.log(method, fullUrl, 200);
+      return response;
+    } catch (error) {
+      const status = error.status || 500;
+      this.logger.log(method, fullUrl, status, error);
+      throw error;
+    }
+  }
+}
+
+const apiHandler = new (class {
+  constructor() {
+    const cache = new RequestCache();
+    const logger = new RequestLogger();
+    this.handler = new LoggingHandler(
+      logger,
+      new ValidationHandler(
+        process.env.API_URL,
+        new CacheHandler(
+          cache,
+          new ApiFetchHandler()
+        )
+      )
+    );
+  }
+
+  async handle(request) {
+    return this.handler.handle(request);
+  }
+})();
 
 export const GET = (request) => apiHandler.handle(request);
 export const POST = (request) => apiHandler.handle(request);
