@@ -1,4 +1,25 @@
+import { Ratelimit } from '@upstash/ratelimit';
+import { kv } from '@vercel/kv';
+
 export const runtime = 'edge';
+
+const ratelimit = new Ratelimit({
+  redis: kv,
+  limiter: Ratelimit.slidingWindow(100, '1 m'), // 100 запросов в минуту
+});
+
+class RateLimitHandler extends Handler {
+  async handle(request) {
+    const ip = request.headers.get('x-forwarded-for') || 'unknown';
+    const { success } = await ratelimit.limit(ip);
+
+    if (!success) {
+      throw { status: 429, message: 'Rate limit exceeded' };
+    }
+
+    return super.handle(request);
+  }
+}
 
 class RequestCache {
   constructor() {
@@ -158,11 +179,13 @@ const apiHandler = new (class {
     const logger = new RequestLogger();
     this.handler = new LoggingHandler(
       logger,
-      new ValidationHandler(
-        process.env.API_URL,
-        new CacheHandler(
-          cache,
-          new ApiFetchHandler()
+      new RateLimitHandler( // Добавляем перед ValidationHandler
+        new ValidationHandler(
+          process.env.API_URL,
+          new CacheHandler(
+            cache,
+            new ApiFetchHandler()
+          )
         )
       )
     );
