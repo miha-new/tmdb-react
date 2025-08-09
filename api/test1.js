@@ -1,16 +1,33 @@
 export const runtime = 'edge';
 
+import { Ratelimit } from '@upstash/ratelimit';
+import { kv } from '@vercel/kv';
+
+const ratelimit = new Ratelimit({
+  redis: kv,
+  limiter: Ratelimit.slidingWindow(100, '1 m'), // 100 запросов в минуту
+});
+
+class RateLimitHandler extends Handler {
+  async handle(request) {
+    const ip = request.headers.get('x-forwarded-for') || 'unknown';
+    const { success } = await ratelimit.limit(ip);
+
+    if (!success) {
+      throw { status: 429, message: 'Rate limit exceeded' };
+    }
+
+    return super.handle(request);
+  }
+}
+
 class RequestCache {
-  constructor() {
-    this.cache = new Map();
+  async get(key) {
+    return await kv.get(key);
   }
 
-  get(key) {
-    return this.cache.get(key);
-  }
-
-  set(key, value) {
-    this.cache.set(key, value);
+  async set(key, value, ttl = 60 * 5) { // TTL 5 минут
+    await kv.setex(key, ttl, value);
   }
 }
 
@@ -20,6 +37,18 @@ class RequestLogger {
       `[${new Date().toISOString()}] ${method} ${path} -> ${status}`,
       error ? `\nERROR: ${error.message}` : ''
     );
+  }
+}
+
+class RequestLogger {
+  log(method, path, status, error = null) {
+    const message = `[${new Date().toISOString()}] ${method} ${path} -> ${status}`;
+    
+    if (error) {
+      console.error(message, `\nERROR: ${error.message}`);
+    } else {
+      console.log(message);
+    }
   }
 }
 
@@ -64,19 +93,12 @@ class ValidationHandler extends Handler {
 }
 
 class CacheHandler extends Handler {
-  constructor(cache, nextHandler = null) {
-    super(nextHandler);
-    this.cache = cache;
-  }
-
   async handle(request) {
     const { method } = request;
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
     const fullUrl = new URL(path, process.env.API_URL).toString();
 
     if (method === 'GET') {
-      const cachedResponse = this.cache.get(`GET:${fullUrl}`);
+      const cachedResponse = await this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
         return new Response(JSON.stringify(cachedResponse), { status: 200 });
       }
@@ -86,7 +108,7 @@ class CacheHandler extends Handler {
 
     if (method === 'GET' && response) {
       const data = await response.json();
-      this.cache.set(`GET:${fullUrl}`, data);
+      await this.cache.set(`GET:${fullUrl}`, data); // Сохраняем в Redis
       return new Response(JSON.stringify(data), { status: 200 });
     }
 
@@ -155,14 +177,16 @@ const apiHandler = new (class {
     const logger = new RequestLogger();
     this.handler = new LoggingHandler(
       logger,
-      new ValidationHandler(
-        process.env.API_URL,
-        new CacheHandler(
-          cache,
-          new ApiFetchHandler()
+      new RateLimitHandler(
+        new ValidationHandler(
+          process.env.API_URL,
+          new CacheHandler(
+            cache,
+            new ApiFetchHandler()
+          )
         )
       )
-    );
+    )
   }
 
   async handle(request) {
