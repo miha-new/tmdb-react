@@ -104,34 +104,16 @@ class CacheHandler extends Handler {
     if (method === 'GET') {
       const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
-        // Возвращаем кэшированный ответ с правильными заголовками
-        return new Response(cachedResponse.body, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            ...cachedResponse.headers
-          }
-        });
+        return new Response(JSON.stringify(cachedResponse), { status: 200 });
       }
     }
 
     const response = await super.handle(request);
 
-    // Кэшируем только JSON ответы
     if (method === 'GET' && response) {
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        try {
-          const data = await response.clone().json();
-          this.cache.set(`GET:${fullUrl}`, {
-            body: JSON.stringify(data),
-            headers: Object.fromEntries(response.headers)
-          });
-        } catch (error) {
-          // Не кэшируем если не удалось распарсить JSON
-          console.warn('Failed to cache non-JSON response');
-        }
-      }
+      const data = await response.json();
+      this.cache.set(`GET:${fullUrl}`, data);
+      return new Response(JSON.stringify(data), { status: 200 });
     }
 
     return response;
@@ -194,31 +176,7 @@ class ApiFetchHandler extends Handler {
       throw { status: apiResponse.status, message: errorText };
     }
 
-    // Определяем тип контента
-    const contentType = apiResponse.headers.get('content-type') || '';
-    const isJson = contentType.includes('application/json');
-
-    // Если ответ не JSON, возвращаем как есть
-    if (!isJson) {
-      return apiResponse;
-    }
-
-    // Для JSON ответа парсим и возвращаем
-    try {
-      const data = await apiResponse.json();
-      return new Response(JSON.stringify(data), {
-        status: apiResponse.status,
-        headers: {
-          'Content-Type': 'application/json',
-          ...Object.fromEntries(apiResponse.headers)
-        }
-      });
-    } catch (error) {
-      throw { 
-        status: 500, 
-        message: 'Failed to parse JSON response from API' 
-      };
-    }
+    return apiResponse;
   }
 }
 
