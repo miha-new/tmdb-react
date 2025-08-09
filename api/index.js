@@ -97,6 +97,35 @@ class CacheHandler extends Handler {
   }
 }
 
+// Добавьте новый класс-обработчик
+class CorsHandler extends Handler {
+  constructor(nextHandler = null) {
+    super(nextHandler);
+  }
+
+  async handle(request) {
+    // Обработка preflight запроса
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Max-Age': '86400', // Кэшировать preflight на 24 часа
+        }
+      });
+    }
+
+    const response = await super.handle(request);
+    
+    // Добавляем CORS заголовки к основному ответу
+    const modifiedResponse = new Response(response.body, response);
+    modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
+    
+    return modifiedResponse;
+  }
+}
+
 class ApiFetchHandler extends Handler {
   async handle(request) {
     const { method } = request;
@@ -156,13 +185,15 @@ const apiHandler = new (class {
   constructor() {
     const cache = new RequestCache();
     const logger = new RequestLogger();
-    this.handler = new LoggingHandler(
-      logger,
-      new ValidationHandler(
-        process.env.API_URL,
-        new CacheHandler(
-          cache,
-          new ApiFetchHandler()
+    this.handler = new CorsHandler(
+      new LoggingHandler(
+        logger,
+        new ValidationHandler(
+          process.env.API_URL,
+          new CacheHandler(
+            cache,
+            new ApiFetchHandler()
+          )
         )
       )
     );
