@@ -9,6 +9,13 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
+// Утилитная функция для построения полного URL
+function getFullUrl(request) {
+  const { searchParams } = new URL(request.url);
+  const path = searchParams.get('path');
+  return path ? new URL(path, process.env.API_URL).toString() : null;
+}
+
 class RequestCache {
   constructor(maxSize = 100) {
     this.cache = new Map();
@@ -20,7 +27,6 @@ class RequestCache {
   }
 
   set(key, value) {
-    // Очистка старых записей при достижении лимита
     if (this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value;
       this.cache.delete(oldestKey);
@@ -69,7 +75,7 @@ class MethodValidationHandler extends Handler {
         headers: {
           'Allow': this.allowedMethods.join(', '),
           'Content-Type': 'text/plain',
-          ...CORS_HEADERS // Добавляем CORS заголовки к ошибке
+          ...CORS_HEADERS
         }
       });
     }
@@ -85,14 +91,13 @@ class ValidationHandler extends Handler {
   }
 
   async handle(request) {
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-
+    const path = getFullUrl(request);
+    
     if (!path || !this.isValidPath(path)) {
       throw { 
         status: 400, 
         message: 'Invalid or missing "path" parameter',
-        headers: CORS_HEADERS // Добавляем CORS заголовки к ошибке
+        headers: CORS_HEADERS
       };
     }
 
@@ -101,7 +106,7 @@ class ValidationHandler extends Handler {
 
   isValidPath(path) {
     try {
-      const url = new URL(path, this.apiUrl);
+      const url = new URL(path);
       return url.hostname === new URL(this.apiUrl).hostname;
     } catch {
       return false;
@@ -117,11 +122,9 @@ class CacheHandler extends Handler {
 
   async handle(request) {
     const { method } = request;
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-    const fullUrl = new URL(path, process.env.API_URL).toString();
+    const fullUrl = getFullUrl(request);
 
-    if (method === 'GET') {
+    if (method === 'GET' && fullUrl) {
       const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
         return new Response(JSON.stringify(cachedResponse), { 
@@ -133,7 +136,7 @@ class CacheHandler extends Handler {
 
     const response = await super.handle(request);
 
-    if (method === 'GET' && response) {
+    if (method === 'GET' && response && fullUrl) {
       const data = await response.json();
       this.cache.set(`GET:${fullUrl}`, data);
       return new Response(JSON.stringify(data), { 
@@ -159,7 +162,6 @@ class CorsHandler extends Handler {
     try {
       const response = await super.handle(request);
       const modifiedResponse = new Response(response.body, response);
-      // Добавляем CORS заголовки, если их еще нет
       Object.entries(CORS_HEADERS).forEach(([key, value]) => {
         if (!modifiedResponse.headers.has(key)) {
           modifiedResponse.headers.set(key, value);
@@ -182,9 +184,7 @@ class CorsHandler extends Handler {
 class ApiFetchHandler extends Handler {
   async handle(request) {
     const { method } = request;
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-    const fullUrl = new URL(path, process.env.API_URL).toString();
+    const fullUrl = getFullUrl(request);
 
     const headers = new Headers({
       'Authorization': `Bearer ${process.env.API_ACCESS_TOKEN}`,
@@ -230,9 +230,7 @@ class LoggingHandler extends Handler {
 
   async handle(request) {
     const { method } = request;
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-    const fullUrl = path ? new URL(path, process.env.API_URL).toString() : '';
+    const fullUrl = getFullUrl(request);
 
     try {
       const response = await super.handle(request);
@@ -251,7 +249,7 @@ const apiHandler = new (class {
     const cache = new RequestCache();
     const logger = new RequestLogger();
     this.handler = new MethodValidationHandler(
-      ALLOWED_METHODS, // Используем константу
+      ALLOWED_METHODS,
       new CorsHandler(
         new LoggingHandler(
           logger,

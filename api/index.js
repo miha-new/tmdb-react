@@ -23,7 +23,11 @@ class RequestCache {
   }
 
   get(key) {
-    return this.cache.get(key);
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    
+    // Клонируем response перед возвратом, так как тело можно прочитать только один раз
+    return entry.clone();
   }
 
   set(key, value) {
@@ -31,7 +35,9 @@ class RequestCache {
       const oldestKey = this.cache.keys().next().value;
       this.cache.delete(oldestKey);
     }
-    this.cache.set(key, value);
+    
+    // Сохраняем клонированный response
+    this.cache.set(key, value.clone());
   }
 }
 
@@ -125,24 +131,27 @@ class CacheHandler extends Handler {
     const fullUrl = getFullUrl(request);
 
     if (method === 'GET' && fullUrl) {
-      const cachedResponse = this.cache.get(`GET:${fullUrl}`);
+      const cacheKey = `GET:${fullUrl}`;
+      const cachedResponse = this.cache.get(cacheKey);
+      
       if (cachedResponse) {
-        return new Response(JSON.stringify(cachedResponse), { 
-          status: 200,
-          headers: CORS_HEADERS
-        });
+        // Возвращаем кэшированный ответ как есть (уже в формате Response)
+        return cachedResponse;
       }
     }
 
     const response = await super.handle(request);
 
     if (method === 'GET' && response && fullUrl) {
-      const data = await response.json();
-      this.cache.set(`GET:${fullUrl}`, data);
-      return new Response(JSON.stringify(data), { 
-        status: 200,
-        headers: CORS_HEADERS
-      });
+      // Клонируем response, так как тело можно прочитать только один раз
+      const responseClone = response.clone();
+      const cacheKey = `GET:${fullUrl}`;
+      
+      // Сохраняем клонированный response целиком
+      this.cache.set(cacheKey, responseClone);
+      
+      // Возвращаем оригинальный response
+      return response;
     }
 
     return response;
