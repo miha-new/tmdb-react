@@ -39,6 +39,29 @@ class Handler {
   }
 }
 
+class MethodValidationHandler extends Handler {
+  constructor(allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], nextHandler = null) {
+    super(nextHandler);
+    this.allowedMethods = allowedMethods;
+  }
+
+  async handle(request) {
+    const { method } = request;
+    
+    if (!this.allowedMethods.includes(method)) {
+      return new Response(`Method ${method} not allowed`, {
+        status: 405,
+        headers: {
+          'Allow': this.allowedMethods.join(', '),
+          'Content-Type': 'text/plain'
+        }
+      });
+    }
+
+    return super.handle(request);
+  }
+}
+
 class ValidationHandler extends Handler {
   constructor(apiUrl, nextHandler = null) {
     super(nextHandler);
@@ -185,14 +208,17 @@ const apiHandler = new (class {
   constructor() {
     const cache = new RequestCache();
     const logger = new RequestLogger();
-    this.handler = new CorsHandler(
-      new LoggingHandler(
-        logger,
-        new ValidationHandler(
-          process.env.API_URL,
-          new CacheHandler(
-            cache,
-            new ApiFetchHandler()
+    this.handler = new MethodValidationHandler(
+      ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      new CorsHandler(
+        new LoggingHandler(
+          logger,
+          new ValidationHandler(
+            process.env.API_URL,
+            new CacheHandler(
+              cache,
+              new ApiFetchHandler()
+            )
           )
         )
       )
