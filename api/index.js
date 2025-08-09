@@ -1,5 +1,28 @@
 export const runtime = 'edge';
 
+class RequestCache {
+  constructor() {
+    this.cache = new Map();
+  }
+
+  get(key) {
+    return this.cache.get(key);
+  }
+
+  set(key, value) {
+    this.cache.set(key, value);
+  }
+}
+
+class RequestLogger {
+  log(method, path, status, error = null) {
+    console.log(
+      `[${new Date().toISOString()}] ${method} ${path} -> ${status}`,
+      error ? `\nERROR: ${error.message}` : ''
+    );
+  }
+}
+
 class Handler {
   constructor(nextHandler = null) {
     this.next = nextHandler;
@@ -9,7 +32,7 @@ class Handler {
     if (this.next) {
       return this.next.handle(request);
     }
-    return null; // Конец цепочки
+    return null;
   }
 }
 
@@ -126,23 +149,26 @@ class LoggingHandler extends Handler {
   }
 }
 
-class ApiHandler {
+const apiHandler = new (class {
   constructor() {
     const cache = new RequestCache();
     const logger = new RequestLogger();
-    const validator = new ValidationHandler(process.env.API_URL);
-    const apiFetcher = new ApiFetchHandler();
-    const cacheHandler = new CacheHandler(cache, apiFetcher);
-    const validationHandler = new ValidationHandler(process.env.API_URL, cacheHandler);
-    this.handler = new LoggingHandler(logger, validationHandler);
+    this.handler = new LoggingHandler(
+      logger,
+      new ValidationHandler(
+        process.env.API_URL,
+        new CacheHandler(
+          cache,
+          new ApiFetchHandler()
+        )
+      )
+    );
   }
 
   async handle(request) {
     return this.handler.handle(request);
   }
-}
-
-const apiHandler = new ApiHandler();
+})();
 
 export const GET = (request) => apiHandler.handle(request);
 export const POST = (request) => apiHandler.handle(request);
