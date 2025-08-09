@@ -321,6 +321,56 @@ class LoggingHandler extends Handler {
   }
 }
 
+// Добавляем этот класс перед объявлением apiHandler
+class CorsHandler extends Handler {
+  constructor(nextHandler = null) {
+    super(nextHandler);
+  }
+
+  async handle(request) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { 
+        headers: {
+          ...CORS_HEADERS,
+          'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+        } 
+      });
+    }
+
+    try {
+      const response = await super.handle(request);
+      
+      // Клонируем response чтобы добавить заголовки
+      const modifiedResponse = new Response(response.body, response);
+      
+      // Добавляем CORS заголовки
+      Object.entries({
+        ...CORS_HEADERS,
+        'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+      }).forEach(([key, value]) => {
+        if (!modifiedResponse.headers.has(key)) {
+          modifiedResponse.headers.set(key, value);
+        }
+      });
+      
+      return modifiedResponse;
+    } catch (error) {
+      // Обрабатываем ошибки с CORS заголовками
+      const status = error.status || 500;
+      const errorResponse = new Response(error.message || 'Internal Server Error', { 
+        status,
+        headers: {
+          'Content-Type': 'text/plain',
+          ...CORS_HEADERS,
+          'Access-Control-Allow-Methods': ALLOWED_METHODS.join(', ')
+        }
+      });
+      
+      throw errorResponse;
+    }
+  }
+}
+
 const apiHandler = new (class {
   constructor() {
     const cache = new RequestCache();
@@ -330,21 +380,21 @@ const apiHandler = new (class {
       new BodySizeHandler(
         MAX_BODY_SIZE,
         new ContentTypeHandler(
-
-          new LoggingHandler(
-            logger,
-            new ValidationHandler(
-              process.env.API_URL,
-              new TimeoutHandler(
-                API_TIMEOUT,
-                new CacheHandler(
-                  cache,
-                  new ApiFetchHandler()
+          new CorsHandler( // Теперь CorsHandler определен
+            new LoggingHandler(
+              logger,
+              new ValidationHandler(
+                process.env.API_URL,
+                new TimeoutHandler(
+                  API_TIMEOUT,
+                  new CacheHandler(
+                    cache,
+                    new ApiFetchHandler()
+                  )
                 )
               )
             )
           )
-          
         )
       )
     );
