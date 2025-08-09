@@ -1,14 +1,16 @@
-import { kv } from '@vercel/kv';
-
 export const runtime = 'edge';
 
 class RequestCache {
-  async get(key) {
-    return await kv.get(key);
+  constructor() {
+    this.cache = new Map();
   }
 
-  async set(key, value, ttl = 60 * 5) { // TTL 5 минут
-    await kv.setex(key, ttl, value);
+  get(key) {
+    return this.cache.get(key);
+  }
+
+  set(key, value) {
+    this.cache.set(key, value);
   }
 }
 
@@ -65,6 +67,11 @@ class ValidationHandler extends Handler {
 }
 
 class CacheHandler extends Handler {
+  constructor(cache, nextHandler = null) {
+    super(nextHandler);
+    this.cache = cache;
+  }
+
   async handle(request) {
     const { method } = request;
     const { searchParams } = new URL(request.url);
@@ -72,7 +79,7 @@ class CacheHandler extends Handler {
     const fullUrl = new URL(path, process.env.API_URL).toString();
 
     if (method === 'GET') {
-      const cachedResponse = await this.cache.get(`GET:${fullUrl}`);
+      const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
         return new Response(JSON.stringify(cachedResponse), { status: 200 });
       }
@@ -82,7 +89,7 @@ class CacheHandler extends Handler {
 
     if (method === 'GET' && response) {
       const data = await response.json();
-      await this.cache.set(`GET:${fullUrl}`, data); // Сохраняем в Redis
+      this.cache.set(`GET:${fullUrl}`, data);
       return new Response(JSON.stringify(data), { status: 200 });
     }
 
