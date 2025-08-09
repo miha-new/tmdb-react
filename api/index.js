@@ -1,6 +1,6 @@
 export const runtime = 'edge';
 
-export async function GET(request) {
+export default async function handlerMethod(request) {
   const API_URL = process.env.API_URL;
   const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 
@@ -42,3 +42,5 @@ export async function GET(request) {
     });
   }
 }
+
+export const GET = handlerMethod;
