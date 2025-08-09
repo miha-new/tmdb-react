@@ -127,25 +127,27 @@ class CorsHandler extends Handler {
   }
 
   async handle(request) {
-    // Обработка preflight запроса
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400', // Кэшировать preflight на 24 часа
+          'Access-Control-Max-Age': '86400',
         }
       });
     }
 
-    const response = await super.handle(request);
-    
-    // Добавляем CORS заголовки к основному ответу
-    const modifiedResponse = new Response(response.body, response);
-    modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
-    
-    return modifiedResponse;
+    try {
+      const response = await super.handle(request);
+      const modifiedResponse = new Response(response.body, response);
+      modifiedResponse.headers.set('Access-Control-Allow-Origin', '*');
+      return modifiedResponse;
+    } catch (error) {
+      const response = new Response(error.message, { status: error.status || 500 });
+      response.headers.set('Access-Control-Allow-Origin', '*');
+      throw response; // Или return response;
+    }
   }
 }
 
