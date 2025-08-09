@@ -36,6 +36,19 @@ class RequestContext {
   }
 }
 
+class Handler {
+  constructor(nextHandler = null) {
+    this.next = nextHandler;
+  }
+
+  async handle(request) {
+    if (this.next) {
+      return this.next.handle(request);
+    }
+    return null;
+  }
+}
+
 class MethodValidationHandler extends Handler {
   constructor(allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], nextHandler = null) {
     super(nextHandler);
