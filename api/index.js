@@ -104,22 +104,16 @@ class CacheHandler extends Handler {
     if (method === 'GET') {
       const cachedResponse = this.cache.get(`GET:${fullUrl}`);
       if (cachedResponse) {
-        // Возвращаем кэшированный Response как есть
-        return cachedResponse;
+        return new Response(JSON.stringify(cachedResponse), { status: 200 });
       }
     }
 
     const response = await super.handle(request);
 
     if (method === 'GET' && response) {
-      // Клонируем response для кэширования, чтобы не нарушать поток
-      const responseToCache = response.clone();
-      try {
-        // Сохраняем весь Response в кэш, а не только данные
-        this.cache.set(`GET:${fullUrl}`, responseToCache);
-      } catch (error) {
-        console.error('Failed to cache response:', error);
-      }
+      const data = await response.json();
+      this.cache.set(`GET:${fullUrl}`, data);
+      return new Response(JSON.stringify(data), { status: 200 });
     }
 
     return response;
